@@ -318,6 +318,8 @@ function onHandResults(results) {
             if (gesturePointer.down) {
                 updatePointerUpData(gesturePointer);
             }
+            smoothX = null;
+            smoothY = null;
         }
     } else {
         // 手离开画面 → 停止
@@ -558,10 +560,14 @@ function startGUI () {
         });
 
     // 水纹模式：自动切白色背景 + 关闭多彩，生成极淡近透明色
+    let savedColorful = config.COLORFUL;
     gui.add(config, 'WATER_MODE').name(t('waterMode')).onChange(v => {
         if (v) {
+            savedColorful = config.COLORFUL;
             setBgMode('white');
             config.COLORFUL = false;
+        } else {
+            config.COLORFUL = savedColorful;
         }
     });
 
@@ -607,7 +613,6 @@ function startGUI () {
 
     let captureFolder = gui.addFolder(t('capture'));
     captureFolder.addColor(config, 'BACK_COLOR').name(t('bgColor'));
-    captureFolder.add(config, 'TRANSPARENT').name(t('transparent'));
     captureFolder.add({ fun: captureScreenshot }, 'fun').name(t('screenshot'));
 
     let github = gui.add({ fun : () => {

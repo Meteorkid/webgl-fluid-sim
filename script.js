@@ -197,8 +197,8 @@ async function startCamera() {
                 await handsInstance.send({ image: gestureVideo });
             } catch (e) { /* 静默跳过单帧错误 */ }
         },
-        width: 640,
-        height: 480
+        width: 320,
+        height: 240
     });
     await cameraInstance.start();
 }
@@ -230,9 +230,9 @@ async function initHands() {
     });
     handsInstance.setOptions({
         maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.5
+        modelComplexity: 0,          // 0=精简模型，速度快一倍
+        minDetectionConfidence: 0.5, // 降低阈值，减少丢帧
+        minTrackingConfidence: 0.3   // 追踪更灵敏
     });
     handsInstance.onResults(onHandResults);
 }
@@ -245,6 +245,10 @@ async function initHands() {
 const FINGER_TIPS = [4, 8, 12, 16, 20]; // 拇指、食指、中指、无名指、小指
 // 对应的 MCP/掌关节
 const FINGER_MCPS = [2, 5, 9, 13, 17];
+
+// 坐标平滑（指数移动平均）
+let smoothX = null, smoothY = null;
+const SMOOTH_FACTOR = 0.4; // 0=完全平滑(延迟大) 1=不平滑(响应快)，0.4 是平衡点
 
 function getExtendedFingers(landmarks) {
     // 返回所有伸直手指的指尖坐标数组
@@ -292,8 +296,17 @@ function onHandResults(results) {
             avgX /= extended.length;
             avgY /= extended.length;
 
-            const posX = (1 - avgX) * canvas.width; // 镜像翻转
-            const posY = avgY * canvas.height;
+            // 指数移动平均平滑，减少抖动
+            if (smoothX === null) {
+                smoothX = avgX;
+                smoothY = avgY;
+            } else {
+                smoothX += (avgX - smoothX) * SMOOTH_FACTOR;
+                smoothY += (avgY - smoothY) * SMOOTH_FACTOR;
+            }
+
+            const posX = (1 - smoothX) * canvas.width; // 镜像翻转
+            const posY = smoothY * canvas.height;
 
             if (!gesturePointer.down) {
                 updatePointerDownData(gesturePointer, -99, posX, posY);
@@ -311,6 +324,8 @@ function onHandResults(results) {
         if (gesturePointer.down) {
             updatePointerUpData(gesturePointer);
         }
+        smoothX = null;
+        smoothY = null;
     }
 }
 

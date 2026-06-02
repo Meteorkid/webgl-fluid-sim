@@ -562,18 +562,14 @@ function startGUI () {
             setBgMode(map[v] || 'black');
         });
 
-    // 水纹模式：自动切白色背景 + 关闭多彩，生成极淡近透明色
+    // 水纹模式：只改变水纹颜色为极淡近透明色，不改变背景
     let savedColorful = config.COLORFUL;
-    let savedBgMode = bgMode;
     gui.add(config, 'WATER_MODE').name(t('waterMode')).onChange(v => {
         if (v) {
             savedColorful = config.COLORFUL;
-            savedBgMode = bgMode;
-            setBgMode('white');
             config.COLORFUL = false;
         } else {
             config.COLORFUL = savedColorful;
-            setBgMode(savedBgMode);
         }
     });
 

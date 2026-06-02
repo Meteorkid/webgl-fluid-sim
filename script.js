@@ -46,7 +46,6 @@ const i18n = {
         weight: 'weight',
         capture: 'Capture',
         bgColor: 'background color',
-        transparent: 'transparent',
         screenshot: 'take screenshot',
         checkApp: 'Check out mobile app',
         langBtn: '中文',
@@ -84,7 +83,6 @@ const i18n = {
         weight: '权重',
         capture: '截图',
         bgColor: '背景颜色',
-        transparent: '透明',
         screenshot: '截图保存',
         checkApp: '下载手机版',
         langBtn: 'English',
@@ -133,7 +131,7 @@ let mediaPipeReady = typeof Hands !== 'undefined' && typeof Camera !== 'undefine
 
 // --- 状态 ---
 let gestureEnabled = false;   // 手势追踪开关
-let bgMode = 'black';         // 背景模式：black | transparent | camera
+let bgMode = 'black';         // 背景模式：black | white | camera
 
 // --- DOM ---
 const gestureVideo = document.getElementById('gestureVideo');
@@ -332,25 +330,30 @@ function onHandResults(results) {
 }
 
 // ============================================
-// 手势开关
+// 手势开关（防竞态锁）
 // ============================================
+let gestureToggling = false;
 async function toggleGesture() {
+    if (gestureToggling) return; // 防止快速连按
+    gestureToggling = true;
+
     gestureEnabled = !gestureEnabled;
 
     if (gestureEnabled) {
         await initHands();
-        if (!handsInstance) { gestureEnabled = false; return; } // Issue 7: init 失败时回退
+        if (!handsInstance) { gestureEnabled = false; gestureToggling = false; return; }
         gesturePointer = new pointerPrototype();
         gesturePointer.id = -99;
-        // 不加入 pointers 数组，避免和触控冲突 (Issue 2)
         await syncCamera();
     } else {
         if (gesturePointer) {
             if (gesturePointer.down) updatePointerUpData(gesturePointer);
             gesturePointer = null;
         }
-        syncCamera();
+        await syncCamera();
     }
+
+    gestureToggling = false;
 }
 
 // Mobile promo section
@@ -561,13 +564,16 @@ function startGUI () {
 
     // 水纹模式：自动切白色背景 + 关闭多彩，生成极淡近透明色
     let savedColorful = config.COLORFUL;
+    let savedBgMode = bgMode;
     gui.add(config, 'WATER_MODE').name(t('waterMode')).onChange(v => {
         if (v) {
             savedColorful = config.COLORFUL;
+            savedBgMode = bgMode;
             setBgMode('white');
             config.COLORFUL = false;
         } else {
             config.COLORFUL = savedColorful;
+            setBgMode(savedBgMode);
         }
     });
 
@@ -1705,8 +1711,6 @@ function render (target) {
 
     if (!config.TRANSPARENT)
         drawColor(target, normalizeColor(config.BACK_COLOR));
-    if (target == null && config.TRANSPARENT && bgMode !== 'camera')
-        drawCheckerboard(target);
     drawDisplay(target);
 }
 

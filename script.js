@@ -24,6 +24,318 @@ SOFTWARE.
 
 'use strict';
 
+// i18n - 中英双语翻译
+const i18n = {
+    en: {
+        quality: 'quality',
+        simResolution: 'sim resolution',
+        densityDiffusion: 'density diffusion',
+        velocityDiffusion: 'velocity diffusion',
+        pressure: 'pressure',
+        vorticity: 'vorticity',
+        splatRadius: 'splat radius',
+        shading: 'shading',
+        colorful: 'colorful',
+        paused: 'paused',
+        randomSplats: 'Random splats',
+        bloom: 'Bloom',
+        enabled: 'enabled',
+        intensity: 'intensity',
+        threshold: 'threshold',
+        sunrays: 'Sunrays',
+        weight: 'weight',
+        capture: 'Capture',
+        bgColor: 'background color',
+        transparent: 'transparent',
+        screenshot: 'take screenshot',
+        checkApp: 'Check out mobile app',
+        langBtn: '中文',
+        promoText: 'Try Fluid Simulation app!',
+        // dropdown options
+        high: 'high',
+        medium: 'medium',
+        low: 'low',
+        veryLow: 'very low',
+        gestureControl: 'Gesture Control',
+        enableGesture: 'enable gesture',
+        bgMode: 'background',
+        bgBlack: 'black',
+        bgWhite: 'white',
+        bgCamera: 'camera',
+        waterMode: 'water mode',
+    },
+    zh: {
+        quality: '画质',
+        simResolution: '模拟分辨率',
+        densityDiffusion: '密度扩散',
+        velocityDiffusion: '速度扩散',
+        pressure: '压力',
+        vorticity: '涡旋强度',
+        splatRadius: '触点半径',
+        shading: '着色',
+        colorful: '多彩模式',
+        paused: '暂停',
+        randomSplats: '随机溅射',
+        bloom: '辉光',
+        enabled: '启用',
+        intensity: '强度',
+        threshold: '阈值',
+        sunrays: '光线',
+        weight: '权重',
+        capture: '截图',
+        bgColor: '背景颜色',
+        transparent: '透明',
+        screenshot: '截图保存',
+        checkApp: '下载手机版',
+        langBtn: 'English',
+        promoText: '试试流体模拟 App！',
+        high: '高',
+        medium: '中',
+        low: '低',
+        veryLow: '极低',
+        gestureControl: '手势控制',
+        enableGesture: '启用手势',
+        bgMode: '背景模式',
+        bgBlack: '黑色',
+        bgWhite: '白色',
+        bgCamera: '摄像头',
+        waterMode: '水纹模式',
+    }
+};
+
+let currentLang = localStorage.getItem('fluidLang') || 'en';
+function t(key) { return i18n[currentLang][key] || key; }
+
+function updatePageTexts() {
+    document.title = currentLang === 'zh' ? 'WebGL 流体模拟' : 'WebGL Fluid Simulation';
+    const promoP = document.querySelector('.promo-body p');
+    if (promoP) promoP.textContent = t('promoText');
+}
+
+function switchLang() {
+    currentLang = currentLang === 'en' ? 'zh' : 'en';
+    localStorage.setItem('fluidLang', currentLang);
+    updatePageTexts();
+    rebuildGUI();
+}
+
+let gui = null;
+function rebuildGUI() {
+    if (gui) { gui.destroy(); gui = null; }
+    startGUI();
+}
+
+// ============================================
+// 摄像头 + 手势 + 背景 统一管理
+// ============================================
+
+let mediaPipeReady = typeof Hands !== 'undefined' && typeof Camera !== 'undefined';
+
+// --- 状态 ---
+let gestureEnabled = false;   // 手势追踪开关
+let bgMode = 'black';         // 背景模式：black | transparent | camera
+
+// --- DOM ---
+const gestureVideo = document.getElementById('gestureVideo');
+const cameraBg = document.getElementById('cameraBg');
+const cameraBgCtx = cameraBg ? cameraBg.getContext('2d') : null;
+const fogOverlay = document.getElementById('fogOverlay');
+
+// --- MediaPipe 实例 ---
+let handsInstance = null;
+let cameraInstance = null;
+let gesturePointer = null;
+
+// ============================================
+// 背景模式
+// ============================================
+function setBgMode(mode) {
+    bgMode = mode;
+
+    // 重置所有背景状态
+    cameraBg.style.display = 'none';
+    fogOverlay.style.display = 'none';
+    document.body.style.backgroundColor = '#000';
+    config.TRANSPARENT = false;
+
+    if (mode === 'white') {
+        document.body.style.backgroundColor = '#fff';
+    } else if (mode === 'camera') {
+        config.TRANSPARENT = true;
+        document.body.style.backgroundColor = 'transparent';
+        cameraBg.style.display = 'block';
+        fogOverlay.style.display = 'block';
+    }
+
+    // 背景变化后重新评估摄像头需求
+    syncCamera();
+}
+
+// ============================================
+// 摄像头生命周期（背景和手势共用）
+// ============================================
+function isCameraNeeded() {
+    return bgMode === 'camera' || gestureEnabled;
+}
+
+async function syncCamera() {
+    if (isCameraNeeded() && !cameraInstance) {
+        await startCamera();
+    } else if (!isCameraNeeded() && cameraInstance) {
+        stopCamera();
+    }
+}
+
+async function startCamera() {
+    if (cameraInstance) return;
+    if (!mediaPipeReady) return;
+    await initHands();
+
+    cameraInstance = new Camera(gestureVideo, {
+        onFrame: async () => {
+            try {
+                await handsInstance.send({ image: gestureVideo });
+            } catch (e) { /* 静默跳过单帧错误 */ }
+        },
+        width: 640,
+        height: 480
+    });
+    await cameraInstance.start();
+}
+
+function stopCamera() {
+    if (!cameraInstance) return;
+    cameraInstance.stop();
+    cameraInstance = null;
+    // 清空背景画面
+    if (cameraBgCtx) {
+        cameraBgCtx.clearRect(0, 0, cameraBg.width, cameraBg.height);
+    }
+}
+
+// ============================================
+// MediaPipe Hands 初始化
+// ============================================
+async function initHands() {
+    if (handsInstance) return;
+    if (!mediaPipeReady) {
+        alert(currentLang === 'zh'
+            ? '手势库加载失败，请检查网络后刷新页面'
+            : 'Gesture library failed to load. Check network and refresh.');
+        return;
+    }
+
+    handsInstance = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    handsInstance.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5
+    });
+    handsInstance.onResults(onHandResults);
+}
+
+// ============================================
+// 每帧回调：背景绘制 + 手势追踪
+// ============================================
+
+// 五指尖 landmark 索引
+const FINGER_TIPS = [4, 8, 12, 16, 20]; // 拇指、食指、中指、无名指、小指
+// 对应的 MCP/掌关节
+const FINGER_MCPS = [2, 5, 9, 13, 17];
+
+function getExtendedFingers(landmarks) {
+    // 返回所有伸直手指的指尖坐标数组
+    const extended = [];
+    for (let i = 0; i < FINGER_TIPS.length; i++) {
+        const tip = landmarks[FINGER_TIPS[i]];
+        const mcp = landmarks[FINGER_MCPS[i]];
+        // 拇指用 x 轴判断，其余用 y 轴（y 轴向下）
+        if (i === 0) {
+            // 拇指：指尖 x 远离掌心 = 伸直
+            if (Math.abs(tip.x - mcp.x) > 0.05) extended.push(tip);
+        } else {
+            // 其余手指：指尖 y < 关节 y = 伸直
+            if (tip.y < mcp.y) extended.push(tip);
+        }
+    }
+    return extended;
+}
+
+function onHandResults(results) {
+    // 1. 背景：摄像头画面 → 全屏模糊背景
+    if (bgMode === 'camera' && cameraBgCtx) {
+        cameraBgCtx.save();
+        cameraBgCtx.clearRect(0, 0, cameraBg.width, cameraBg.height);
+        cameraBgCtx.translate(cameraBg.width, 0);
+        cameraBgCtx.scale(-1, 1);
+        cameraBgCtx.drawImage(results.image, 0, 0, cameraBg.width, cameraBg.height);
+        cameraBgCtx.restore();
+    }
+
+    // 2. 手势：任意伸出的手指 → 流体指针
+    if (!gestureEnabled || !gesturePointer) return;
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+        const extended = getExtendedFingers(landmarks);
+
+        if (extended.length > 0) {
+            // 取所有伸出手指的平均位置
+            let avgX = 0, avgY = 0;
+            for (const tip of extended) {
+                avgX += tip.x;
+                avgY += tip.y;
+            }
+            avgX /= extended.length;
+            avgY /= extended.length;
+
+            const posX = (1 - avgX) * canvas.width; // 镜像翻转
+            const posY = avgY * canvas.height;
+
+            if (!gesturePointer.down) {
+                updatePointerDownData(gesturePointer, -99, posX, posY);
+            } else {
+                updatePointerMoveData(gesturePointer, posX, posY);
+            }
+        } else {
+            // 所有手指收拢 → 停止
+            if (gesturePointer.down) {
+                updatePointerUpData(gesturePointer);
+            }
+        }
+    } else {
+        // 手离开画面 → 停止
+        if (gesturePointer.down) {
+            updatePointerUpData(gesturePointer);
+        }
+    }
+}
+
+// ============================================
+// 手势开关
+// ============================================
+async function toggleGesture() {
+    gestureEnabled = !gestureEnabled;
+
+    if (gestureEnabled) {
+        await initHands();
+        if (!handsInstance) { gestureEnabled = false; return; } // Issue 7: init 失败时回退
+        gesturePointer = new pointerPrototype();
+        gesturePointer.id = -99;
+        // 不加入 pointers 数组，避免和触控冲突 (Issue 2)
+        await syncCamera();
+    } else {
+        if (gesturePointer) {
+            if (gesturePointer.down) updatePointerUpData(gesturePointer);
+            gesturePointer = null;
+        }
+        syncCamera();
+    }
+}
+
 // Mobile promo section
 
 const promoPopup = document.getElementsByClassName('promo')[0];
@@ -53,7 +365,7 @@ googleLink.addEventListener('click', e => {
 
 // Simulation section
 
-const canvas = document.getElementsByTagName('canvas')[0];
+const canvas = document.getElementById('fluidCanvas');
 resizeCanvas();
 
 let config = {
@@ -70,6 +382,7 @@ let config = {
     SHADING: true,
     COLORFUL: true,
     COLOR_UPDATE_SPEED: 10,
+    WATER_MODE: false,
     PAUSED: false,
     BACK_COLOR: { r: 0, g: 0, b: 0 },
     TRANSPARENT: false,
@@ -113,7 +426,13 @@ if (!ext.supportLinearFiltering) {
     config.SUNRAYS = false;
 }
 
-startGUI();
+updatePageTexts();
+try {
+    startGUI();
+} catch (e) {
+    console.error('GUI init error:', e);
+    document.title = 'ERROR: ' + e.message;
+}
 
 function getWebGLContext (canvas) {
     const params = { alpha: true, depth: false, stencil: false, antialias: false, preserveDrawingBuffer: false };
@@ -206,35 +525,75 @@ function supportRenderTextureFormat (gl, internalFormat, format, type) {
 }
 
 function startGUI () {
-    var gui = new dat.GUI({ width: 300 });
-    gui.add(config, 'DYE_RESOLUTION', { 'high': 1024, 'medium': 512, 'low': 256, 'very low': 128 }).name('quality').onFinishChange(initFramebuffers);
-    gui.add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name('sim resolution').onFinishChange(initFramebuffers);
-    gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name('density diffusion');
-    gui.add(config, 'VELOCITY_DISSIPATION', 0, 4.0).name('velocity diffusion');
-    gui.add(config, 'PRESSURE', 0.0, 1.0).name('pressure');
-    gui.add(config, 'CURL', 0, 50).name('vorticity').step(1);
-    gui.add(config, 'SPLAT_RADIUS', 0.01, 1.0).name('splat radius');
-    gui.add(config, 'SHADING').name('shading').onFinishChange(updateKeywords);
-    gui.add(config, 'COLORFUL').name('colorful');
-    gui.add(config, 'PAUSED').name('paused').listen();
+    gui = new dat.GUI({ width: 300 });
+
+    // 语言切换按钮
+    let langBtn = gui.add({ fun: switchLang }, 'fun').name(t('langBtn'));
+    langBtn.__li.className = 'cr function bigFont';
+    langBtn.__li.style.borderLeft = '3px solid #FFD700';
+
+    // 背景模式（从当前 bgMode 同步初始值，避免切语言后下拉失步）
+    const bgModeMap = { black: 'bgBlack', white: 'bgWhite', camera: 'bgCamera' };
+    let bgConfig = { mode: t(bgModeMap[bgMode] || 'bgBlack') };
+    gui.add(bgConfig, 'mode', [t('bgBlack'), t('bgWhite'), t('bgCamera')])
+        .name(t('bgMode'))
+        .onChange(v => {
+            const map = { [t('bgBlack')]: 'black', [t('bgWhite')]: 'white', [t('bgCamera')]: 'camera' };
+            setBgMode(map[v] || 'black');
+        });
+
+    // 水纹模式：自动切白色背景 + 关闭多彩，生成极淡近透明色
+    gui.add(config, 'WATER_MODE').name(t('waterMode')).onChange(v => {
+        if (v) {
+            setBgMode('white');
+            config.COLORFUL = false;
+        }
+    });
+
+    // 手势控制
+    try {
+        let gestureFolder = gui.addFolder(t('gestureControl'));
+        let gestureBtn = gestureFolder.add({ fun: function() { toggleGesture(); } }, 'fun');
+        gestureBtn.name(t('enableGesture'));
+        if (!mediaPipeReady) {
+            gestureFolder.__ul.style.opacity = '0.5';
+        }
+    } catch (e2) {
+        console.error('Gesture GUI error:', e2);
+    }
+
+    try {
+        gui.add(config, 'DYE_RESOLUTION', { [t('high')]: 1024, [t('medium')]: 512, [t('low')]: 256, [t('veryLow')]: 128 }).name(t('quality')).onFinishChange(initFramebuffers);
+    } catch (e3) {
+        console.error('Quality GUI error:', e3);
+    }
+    gui.add(config, 'SIM_RESOLUTION', { '32': 32, '64': 64, '128': 128, '256': 256 }).name(t('simResolution')).onFinishChange(initFramebuffers);
+    gui.add(config, 'DENSITY_DISSIPATION', 0, 4.0).name(t('densityDiffusion'));
+    gui.add(config, 'VELOCITY_DISSIPATION', 0, 4.0).name(t('velocityDiffusion'));
+    gui.add(config, 'PRESSURE', 0.0, 1.0).name(t('pressure'));
+    gui.add(config, 'CURL', 0, 50).name(t('vorticity')).step(1);
+    gui.add(config, 'SPLAT_RADIUS', 0.01, 1.0).name(t('splatRadius'));
+    gui.add(config, 'SHADING').name(t('shading')).onFinishChange(updateKeywords);
+    gui.add(config, 'COLORFUL').name(t('colorful'));
+    gui.add(config, 'PAUSED').name(t('paused')).listen();
 
     gui.add({ fun: () => {
         splatStack.push(parseInt(Math.random() * 20) + 5);
-    } }, 'fun').name('Random splats');
+    } }, 'fun').name(t('randomSplats'));
 
-    let bloomFolder = gui.addFolder('Bloom');
-    bloomFolder.add(config, 'BLOOM').name('enabled').onFinishChange(updateKeywords);
-    bloomFolder.add(config, 'BLOOM_INTENSITY', 0.1, 2.0).name('intensity');
-    bloomFolder.add(config, 'BLOOM_THRESHOLD', 0.0, 1.0).name('threshold');
+    let bloomFolder = gui.addFolder(t('bloom'));
+    bloomFolder.add(config, 'BLOOM').name(t('enabled')).onFinishChange(updateKeywords);
+    bloomFolder.add(config, 'BLOOM_INTENSITY', 0.1, 2.0).name(t('intensity'));
+    bloomFolder.add(config, 'BLOOM_THRESHOLD', 0.0, 1.0).name(t('threshold'));
 
-    let sunraysFolder = gui.addFolder('Sunrays');
-    sunraysFolder.add(config, 'SUNRAYS').name('enabled').onFinishChange(updateKeywords);
-    sunraysFolder.add(config, 'SUNRAYS_WEIGHT', 0.3, 1.0).name('weight');
+    let sunraysFolder = gui.addFolder(t('sunrays'));
+    sunraysFolder.add(config, 'SUNRAYS').name(t('enabled')).onFinishChange(updateKeywords);
+    sunraysFolder.add(config, 'SUNRAYS_WEIGHT', 0.3, 1.0).name(t('weight'));
 
-    let captureFolder = gui.addFolder('Capture');
-    captureFolder.addColor(config, 'BACK_COLOR').name('background color');
-    captureFolder.add(config, 'TRANSPARENT').name('transparent');
-    captureFolder.add({ fun: captureScreenshot }, 'fun').name('take screenshot');
+    let captureFolder = gui.addFolder(t('capture'));
+    captureFolder.addColor(config, 'BACK_COLOR').name(t('bgColor'));
+    captureFolder.add(config, 'TRANSPARENT').name(t('transparent'));
+    captureFolder.add({ fun: captureScreenshot }, 'fun').name(t('screenshot'));
 
     let github = gui.add({ fun : () => {
         window.open('https://github.com/PavelDoGreat/WebGL-Fluid-Simulation');
@@ -269,12 +628,21 @@ function startGUI () {
     let app = gui.add({ fun : () => {
         ga('send', 'event', 'link button', 'app');
         window.open('http://onelink.to/5b58bn');
-    } }, 'fun').name('Check out mobile app');
+    } }, 'fun').name(t('checkApp'));
     app.__li.className = 'cr function appBigFont';
     app.__li.style.borderLeft = '3px solid #00FF7F';
     let appIcon = document.createElement('span');
     app.domElement.parentElement.appendChild(appIcon);
     appIcon.className = 'icon app';
+
+    // 快捷键提示
+    let shortcutText = currentLang === 'zh'
+        ? 'H:隐藏面板 G:手势 P:暂停 空格:溅射'
+        : 'H:Panel G:Gesture P:Pause Space:Splat';
+    let shortcuts = gui.add({ fun: () => {} }, 'fun').name(shortcutText);
+    shortcuts.__li.className = 'cr function bigFont';
+    shortcuts.__li.style.borderLeft = '3px solid #666';
+    shortcuts.__li.style.cursor = 'default';
 
     if (isMobile())
         gui.close();
@@ -295,7 +663,6 @@ function captureScreenshot () {
     let captureCanvas = textureToCanvas(texture, target.width, target.height);
     let datauri = captureCanvas.toDataURL();
     downloadURI('fluid.png', datauri);
-    URL.revokeObjectURL(datauri);
 }
 
 function framebufferToTexture (target) {
@@ -1213,6 +1580,7 @@ function updateColors (dt) {
         pointers.forEach(p => {
             p.color = generateColor();
         });
+        if (gesturePointer) gesturePointer.color = generateColor();
     }
 }
 
@@ -1226,6 +1594,12 @@ function applyInputs () {
             splatPointer(p);
         }
     });
+
+    // 手势指针单独处理（不在 pointers 数组中）
+    if (gesturePointer && gesturePointer.moved) {
+        gesturePointer.moved = false;
+        splatPointer(gesturePointer);
+    }
 }
 
 function step (dt) {
@@ -1311,7 +1685,7 @@ function render (target) {
 
     if (!config.TRANSPARENT)
         drawColor(target, normalizeColor(config.BACK_COLOR));
-    if (target == null && config.TRANSPARENT)
+    if (target == null && config.TRANSPARENT && bgMode !== 'camera')
         drawCheckerboard(target);
     drawDisplay(target);
 }
@@ -1464,10 +1838,7 @@ function correctRadius (radius) {
 canvas.addEventListener('mousedown', e => {
     let posX = scaleByPixelRatio(e.offsetX);
     let posY = scaleByPixelRatio(e.offsetY);
-    let pointer = pointers.find(p => p.id == -1);
-    if (pointer == null)
-        pointer = new pointerPrototype();
-    updatePointerDownData(pointer, -1, posX, posY);
+    updatePointerDownData(pointers[0], -1, posX, posY);
 });
 
 canvas.addEventListener('mousemove', e => {
@@ -1521,6 +1892,14 @@ window.addEventListener('keydown', e => {
         config.PAUSED = !config.PAUSED;
     if (e.key === ' ')
         splatStack.push(parseInt(Math.random() * 20) + 5);
+    // H - 显示/隐藏控制面板
+    if (e.code === 'KeyH' && gui) {
+        gui.__ul.parentElement.style.display =
+            gui.__ul.parentElement.style.display === 'none' ? '' : 'none';
+    }
+    // G - 开关手势控制
+    if (e.code === 'KeyG')
+        toggleGesture();
 });
 
 function updatePointerDownData (pointer, id, posX, posY) {
@@ -1563,6 +1942,14 @@ function correctDeltaY (delta) {
 }
 
 function generateColor () {
+    if (config.WATER_MODE) {
+        // 水纹模式：极淡的近透明色，模拟真实水纹折射
+        let c = HSVtoRGB(Math.random(), 0.05, 1.0);
+        c.r *= 0.04;
+        c.g *= 0.04;
+        c.b *= 0.04;
+        return c;
+    }
     let c = HSVtoRGB(Math.random(), 1.0, 1.0);
     c.r *= 0.15;
     c.g *= 0.15;

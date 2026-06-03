@@ -133,10 +133,19 @@ const cameraBg = document.getElementById('cameraBg');
 const cameraBgCtx = cameraBg ? cameraBg.getContext('2d') : null;
 const fogOverlay = document.getElementById('fogOverlay');
 
+// 动态设置摄像头背景 canvas 分辨率
+function resizeCameraBg() {
+    if (!cameraBg) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cameraBg.width = Math.round(window.innerWidth * dpr * 0.5);
+    cameraBg.height = Math.round(window.innerHeight * dpr * 0.5);
+}
+resizeCameraBg();
+window.addEventListener('resize', resizeCameraBg);
+
 // --- MediaPipe 实例 ---
 let handsInstance = null;
 let cameraInstance = null;
-let gesturePointer = null;
 
 // ============================================
 // 背景模式
@@ -189,8 +198,8 @@ async function startCamera() {
                 await handsInstance.send({ image: gestureVideo });
             } catch (e) { /* 静默跳过单帧错误 */ }
         },
-        width: 320,
-        height: 240
+        width: 256,
+        height: 192
     });
     await cameraInstance.start();
 }
@@ -222,9 +231,9 @@ async function initHands() {
     });
     handsInstance.setOptions({
         maxNumHands: 1,
-        modelComplexity: 0,          // 0=精简模型，速度快一倍
-        minDetectionConfidence: 0.5, // 降低阈值，减少丢帧
-        minTrackingConfidence: 0.3   // 追踪更灵敏
+        modelComplexity: 0,          // 0=精简模型，最快
+        minDetectionConfidence: 0.6, // 适中阈值，减少误检
+        minTrackingConfidence: 0.5   // 追踪稳定
     });
     handsInstance.onResults(onHandResults);
 }
@@ -235,30 +244,58 @@ async function initHands() {
 
 // 五指尖 landmark 索引
 const FINGER_TIPS = [4, 8, 12, 16, 20]; // 拇指、食指、中指、无名指、小指
-// 对应的 MCP/掌关节
 const FINGER_MCPS = [2, 5, 9, 13, 17];
+const FINGER_PIPS = [3, 6, 10, 14, 18]; // 中间关节
 
-// 坐标平滑（指数移动平均）
-let smoothX = null, smoothY = null;
-const SMOOTH_FACTOR = 0.4; // 0=完全平滑(延迟大) 1=不平滑(响应快)，0.4 是平衡点
+// 坐标平滑 — 每指独立平滑
+const SMOOTH_FACTOR = 0.65; // 更高 = 更跟手（0.65 是响应速度和稳定性的最佳平衡）
 
-function getExtendedFingers(landmarks) {
-    // 返回所有伸直手指的指尖坐标数组
-    const extended = [];
+// 多指追踪状态
+let fingerStates = []; // [{smoothX, smoothY, pointer, id}]
+
+function isFingerExtended(landmarks, i) {
+    const tip = landmarks[FINGER_TIPS[i]];
+    const pip = landmarks[FINGER_PIPS[i]];
+    const mcp = landmarks[FINGER_MCPS[i]];
+    if (i === 0) {
+        // 拇指：指尖远离掌心
+        const wrist = landmarks[0];
+        return Math.abs(tip.x - wrist.x) > Math.abs(mcp.x - wrist.x) + 0.02;
+    }
+    // 其余手指：PIP 弯曲角度 — tip 在 pip 上方 且 pip 在 mcp 上方
+    return tip.y < pip.y && pip.y < mcp.y;
+}
+
+function getFingerStates(landmarks) {
+    const result = [];
     for (let i = 0; i < FINGER_TIPS.length; i++) {
-        const tip = landmarks[FINGER_TIPS[i]];
-        const mcp = landmarks[FINGER_MCPS[i]];
-        // 拇指用 x 轴判断，其余用 y 轴（y 轴向下）
-        if (i === 0) {
-            // 拇指：指尖 x 远离掌心 = 伸直
-            if (Math.abs(tip.x - mcp.x) > 0.05) extended.push(tip);
-        } else {
-            // 其余手指：指尖 y < 关节 y = 伸直
-            if (tip.y < mcp.y) extended.push(tip);
+        if (isFingerExtended(landmarks, i)) {
+            result.push({
+                id: i,
+                x: landmarks[FINGER_TIPS[i]].x,
+                y: landmarks[FINGER_TIPS[i]].y
+            });
         }
     }
-    return extended;
+    return result;
 }
+
+function isPinching(landmarks) {
+    // 捏合检测：拇指尖和食指尖距离很近
+    const thumb = landmarks[4];
+    const index = landmarks[8];
+    const dx = thumb.x - index.x;
+    const dy = thumb.y - index.y;
+    return Math.sqrt(dx * dx + dy * dy) < 0.05;
+}
+
+// 五指溅射 — 一次性发射大量溅射
+function fiveFingerSplash() {
+    splatStack.push(parseInt(Math.random() * 15) + 10);
+}
+
+let lastSplashTime = 0;
+const SPLASH_COOLDOWN = 800; // 溅射冷却 ms
 
 function onHandResults(results) {
     // 1. 背景：摄像头画面 → 全屏模糊背景
@@ -271,55 +308,73 @@ function onHandResults(results) {
         cameraBgCtx.restore();
     }
 
-    // 2. 手势：任意伸出的手指 → 流体指针
-    if (!gestureEnabled || !gesturePointer) return;
+    // 2. 手势追踪
+    if (!gestureEnabled) return;
 
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const landmarks = results.multiHandLandmarks[0];
-        const extended = getExtendedFingers(landmarks);
+        const fingers = getFingerStates(landmarks);
+        const now = performance.now();
 
-        if (extended.length > 0) {
-            // 取所有伸出手指的平均位置
-            let avgX = 0, avgY = 0;
-            for (const tip of extended) {
-                avgX += tip.x;
-                avgY += tip.y;
-            }
-            avgX /= extended.length;
-            avgY /= extended.length;
+        // 五指全伸 → 溅射特效
+        if (fingers.length >= 5 && now - lastSplashTime > SPLASH_COOLDOWN) {
+            fiveFingerSplash();
+            lastSplashTime = now;
+        }
 
-            // 指数移动平均平滑，减少抖动
-            if (smoothX === null) {
-                smoothX = avgX;
-                smoothY = avgY;
+        // 捏合模式：拇指+食指捏合时只追踪食指（更精准）
+        let trackFingers = fingers;
+        if (isPinching(landmarks) && fingers.length > 1) {
+            // 只追踪食指（id=1）
+            trackFingers = fingers.filter(f => f.id === 1);
+            if (trackFingers.length === 0) trackFingers = [fingers[0]]; // fallback
+        }
+
+        // 同步指针数量
+        while (fingerStates.length < trackFingers.length) {
+            fingerStates.push({
+                smoothX: null, smoothY: null,
+                pointer: new pointerPrototype(),
+                id: -100 - fingerStates.length
+            });
+            fingerStates[fingerStates.length - 1].pointer.id = fingerStates[fingerStates.length - 1].id;
+        }
+        // 多余的指针抬起
+        while (fingerStates.length > trackFingers.length) {
+            const fs = fingerStates.pop();
+            if (fs.pointer.down) updatePointerUpData(fs.pointer);
+        }
+
+        // 更新每个指针
+        for (let i = 0; i < trackFingers.length; i++) {
+            const fs = fingerStates[i];
+            const f = trackFingers[i];
+
+            // 指数移动平均
+            if (fs.smoothX === null) {
+                fs.smoothX = f.x;
+                fs.smoothY = f.y;
             } else {
-                smoothX += (avgX - smoothX) * SMOOTH_FACTOR;
-                smoothY += (avgY - smoothY) * SMOOTH_FACTOR;
+                fs.smoothX += (f.x - fs.smoothX) * SMOOTH_FACTOR;
+                fs.smoothY += (f.y - fs.smoothY) * SMOOTH_FACTOR;
             }
 
-            const posX = (1 - smoothX) * canvas.width; // 镜像翻转
-            const posY = smoothY * canvas.height;
+            const posX = (1 - fs.smoothX) * canvas.width;
+            const posY = fs.smoothY * canvas.height;
 
-            if (!gesturePointer.down) {
-                updatePointerDownData(gesturePointer, -99, posX, posY);
+            if (!fs.pointer.down) {
+                updatePointerDownData(fs.pointer, fs.id, posX, posY);
             } else {
-                updatePointerMoveData(gesturePointer, posX, posY);
+                updatePointerMoveData(fs.pointer, posX, posY);
             }
-        } else {
-            // 所有手指收拢 → 停止
-            if (gesturePointer.down) {
-                updatePointerUpData(gesturePointer);
-            }
-            smoothX = null;
-            smoothY = null;
         }
     } else {
-        // 手离开画面 → 停止
-        if (gesturePointer.down) {
-            updatePointerUpData(gesturePointer);
+        // 手离开画面 → 所有指针抬起
+        for (const fs of fingerStates) {
+            if (fs.pointer.down) updatePointerUpData(fs.pointer);
+            fs.smoothX = null;
+            fs.smoothY = null;
         }
-        smoothX = null;
-        smoothY = null;
     }
 }
 
@@ -327,6 +382,22 @@ function onHandResults(results) {
 // 手势开关（防竞态锁）
 // ============================================
 let gestureToggling = false;
+let gestureBtnRef = null; // 保存按钮引用，用于状态更新
+
+function updateGestureBtnUI() {
+    if (!gestureBtnRef) return;
+    const nameEl = gestureBtnRef.__li.querySelector('.property-name');
+    if (nameEl) {
+        nameEl.textContent = t('enableGesture');
+        nameEl.style.color = gestureEnabled
+            ? '#34C759'
+            : 'rgba(255,255,255,0.70)';
+    }
+    gestureBtnRef.__li.style.borderLeft = gestureEnabled
+        ? '3px solid #34C759'
+        : '3px solid rgba(255,255,255,0.15)';
+}
+
 async function toggleGesture() {
     if (gestureToggling) return; // 防止快速连按
     gestureToggling = true;
@@ -336,17 +407,18 @@ async function toggleGesture() {
     if (gestureEnabled) {
         await initHands();
         if (!handsInstance) { gestureEnabled = false; gestureToggling = false; return; }
-        gesturePointer = new pointerPrototype();
-        gesturePointer.id = -99;
+        fingerStates = [];
         await syncCamera();
     } else {
-        if (gesturePointer) {
-            if (gesturePointer.down) updatePointerUpData(gesturePointer);
-            gesturePointer = null;
+        // 抬起所有指针
+        for (const fs of fingerStates) {
+            if (fs.pointer.down) updatePointerUpData(fs.pointer);
         }
+        fingerStates = [];
         await syncCamera();
     }
 
+    updateGestureBtnUI();
     gestureToggling = false;
 }
 
@@ -528,21 +600,30 @@ function startGUI () {
         });
 
     // 水纹模式：只改变水纹颜色为极淡近透明色，不改变背景
-    let savedColorful = config.COLORFUL;
     gui.add(config, 'WATER_MODE').name(t('waterMode')).onChange(v => {
         if (v) {
-            savedColorful = config.COLORFUL;
+            config._savedColorful = config.COLORFUL;
             config.COLORFUL = false;
         } else {
-            config.COLORFUL = savedColorful;
+            config.COLORFUL = config._savedColorful !== undefined ? config._savedColorful : true;
+        }
+        // 强制刷新所有 GUI 控件显示
+        for (let i = 0; i < gui.__controllers.length; i++) {
+            gui.__controllers[i].updateDisplay();
         }
     });
 
     // 手势控制
     try {
         let gestureFolder = gui.addFolder(t('gestureControl'));
-        let gestureBtn = gestureFolder.add({ fun: function() { toggleGesture(); } }, 'fun');
-        gestureBtn.name(t('enableGesture'));
+        gestureBtnRef = gestureFolder.add({ fun: function() { toggleGesture(); } }, 'fun');
+        gestureBtnRef.name(t('enableGesture'));
+        gestureBtnRef.__li.querySelector('.property-name').style.color = gestureEnabled
+            ? '#34C759'
+            : 'rgba(255,255,255,0.70)';
+        gestureBtnRef.__li.style.borderLeft = gestureEnabled
+            ? '3px solid #34C759'
+            : '3px solid rgba(255,255,255,0.15)';
         if (!mediaPipeReady) {
             gestureFolder.__ul.style.opacity = '0.5';
         }
@@ -593,12 +674,13 @@ function startGUI () {
 
     // 快捷键提示
     let shortcutText = currentLang === 'zh'
-        ? 'H:隐藏面板 G:手势 P:暂停 空格:溅射'
-        : 'H:Panel G:Gesture P:Pause Space:Splat';
+        ? '⌨ H:面板 G:手势 P:暂停 空格:溅射'
+        : '⌨ H:Panel G:Gesture P:Pause Space:Splat';
     let shortcuts = gui.add({ fun: () => {} }, 'fun').name(shortcutText);
     shortcuts.__li.className = 'cr function bigFont';
-    shortcuts.__li.style.borderLeft = '3px solid #666';
+    shortcuts.__li.style.borderLeft = '3px solid rgba(255,255,255,0.08)';
     shortcuts.__li.style.cursor = 'default';
+    shortcuts.__li.style.opacity = '0.6';
 
     if (isMobile())
         gui.close();
@@ -1536,7 +1618,7 @@ function updateColors (dt) {
         pointers.forEach(p => {
             p.color = generateColor();
         });
-        if (gesturePointer) gesturePointer.color = generateColor();
+        fingerStates.forEach(fs => { fs.pointer.color = generateColor(); });
     }
 }
 
@@ -1551,11 +1633,13 @@ function applyInputs () {
         }
     });
 
-    // 手势指针单独处理（不在 pointers 数组中）
-    if (gesturePointer && gesturePointer.moved) {
-        gesturePointer.moved = false;
-        splatPointer(gesturePointer);
-    }
+    // 手势多指独立处理（不在 pointers 数组中）
+    fingerStates.forEach(fs => {
+        if (fs.pointer.moved) {
+            fs.pointer.moved = false;
+            splatPointer(fs.pointer);
+        }
+    });
 }
 
 function step (dt) {
@@ -1842,10 +1926,16 @@ window.addEventListener('touchend', e => {
 });
 
 window.addEventListener('keydown', e => {
+    // 输入框内不触发快捷键
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
     if (e.code === 'KeyP')
         config.PAUSED = !config.PAUSED;
-    if (e.key === ' ')
+    if (e.code === 'Space') {
+        e.preventDefault();
         splatStack.push(parseInt(Math.random() * 20) + 5);
+    }
     // H - 显示/隐藏控制面板
     if (e.code === 'KeyH' && gui) {
         gui.__ul.parentElement.style.display =

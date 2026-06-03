@@ -61,6 +61,7 @@
 
             /* 主容器 — 磨砂玻璃 */
             .dg.main {
+                position: relative;
                 background: rgba(18, 18, 28, 0.55) !important;
                 backdrop-filter: blur(50px) saturate(200%);
                 -webkit-backdrop-filter: blur(50px) saturate(200%);
@@ -118,44 +119,141 @@
                 border: 1px solid rgba(255, 255, 255, 0.10) !important;
                 border-radius: 6px !important;
                 color: rgba(255, 255, 255, 0.90) !important;
+                transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            }
+            .dg .c select:hover {
+                border-color: rgba(255, 255, 255, 0.18) !important;
+            }
+            .dg .c select:focus {
+                border-color: rgba(10, 132, 255, 0.5) !important;
+                box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.12);
+                outline: none;
             }
 
-            /* 复选框 */
+            /* 复选框 — iOS 风格 */
             .dg .c input[type=checkbox] {
-                accent-color: #0a84ff;
+                -webkit-appearance: none;
+                appearance: none;
+                width: 36px !important;
+                height: 22px !important;
+                background: rgba(255, 255, 255, 0.15);
+                border-radius: 11px;
+                position: relative !important;
+                cursor: pointer;
+                transition: background 0.25s ease;
+                flex-shrink: 0;
+                float: none !important;
+            }
+            .dg .c input[type=checkbox]::after {
+                content: '';
+                position: absolute;
+                top: 2px;
+                left: 2px;
+                width: 18px;
+                height: 18px;
+                background: rgba(255, 255, 255, 0.9);
+                border-radius: 50%;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .dg .c input[type=checkbox]:checked {
+                background: linear-gradient(135deg, #0a84ff, #5ac8fa);
+            }
+            .dg .c input[type=checkbox]:checked::after {
+                transform: translateX(14px);
             }
 
             /* 滑块轨道 */
             .dg .c .slider {
                 background: rgba(255, 255, 255, 0.08) !important;
                 border-radius: 4px;
+                height: 4px !important;
+                margin-top: 2px !important;
             }
             .dg .c .slider-fg {
                 background: linear-gradient(90deg, #0a84ff, #5ac8fa) !important;
                 border-radius: 4px;
+                box-shadow: 0 0 8px rgba(10, 132, 255, 0.3);
             }
             .dg .c .slider .slider-knob {
+                width: 14px !important;
+                height: 14px !important;
                 background: rgba(255, 255, 255, 0.95) !important;
                 border-radius: 50%;
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+                box-shadow:
+                    0 1px 4px rgba(0, 0, 0, 0.4),
+                    0 0 0 2px rgba(255, 255, 255, 0.1);
+                transition: transform 0.15s ease, box-shadow 0.15s ease;
+            }
+            .dg .c .slider .slider-knob:hover,
+            .dg .c .slider .slider-knob:active {
+                transform: scale(1.2);
+                box-shadow:
+                    0 2px 8px rgba(0, 0, 0, 0.5),
+                    0 0 0 3px rgba(10, 132, 255, 0.2);
             }
 
             /* 文件夹 */
             .dg .folder .title {
                 background: rgba(255, 255, 255, 0.03) !important;
                 border-left: 3px solid rgba(10, 132, 255, 0.5);
-                transition: background 0.2s ease;
+                transition: background 0.2s ease, border-color 0.2s ease;
             }
             .dg .folder .title:hover {
                 background: rgba(255, 255, 255, 0.06) !important;
+                border-left-color: rgba(10, 132, 255, 0.8);
+            }
+            .dg .folder.closed ul {
+                display: none;
+            }
+            .dg .folder:not(.closed) ul {
+                animation: folderSlideIn 0.2s ease-out;
+            }
+            @keyframes folderSlideIn {
+                from { opacity: 0; transform: translateY(-4px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+
+            /* 面板入场动画 */
+            .dg.main {
+                animation: panelFadeIn 0.3s ease-out;
+            }
+            @keyframes panelFadeIn {
+                from {
+                    opacity: 0;
+                    margin-left: -10px;
+                }
+                to {
+                    opacity: 1;
+                    margin-left: 0;
+                }
+            }
+
+            /* 面板顶部光晕 */
+            .dg.main::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 60px;
+                background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, transparent 100%);
+                pointer-events: none;
+                border-radius: 16px 16px 0 0;
+                z-index: -1;
             }
 
             /* 函数按钮 */
             .dg .cr.function:not(.appBigFont) {
                 background: transparent !important;
+                transition: background 0.2s ease, transform 0.1s ease;
             }
             .dg .cr.function:not(.appBigFont):hover {
-                background: rgba(255, 255, 255, 0.06) !important;
+                background: rgba(10, 132, 255, 0.10) !important;
+            }
+            .dg .cr.function:not(.appBigFont):active {
+                background: rgba(10, 132, 255, 0.18) !important;
+                transform: scale(0.98);
             }
             .dg .cr.function:not(.appBigFont) .property-name {
                 color: rgba(255, 255, 255, 0.70) !important;
@@ -206,7 +304,7 @@
     </head>
     <body>
         <!-- 摄像头背景 + 水雾蒙版 -->
-        <canvas id="cameraBg" width="640" height="480"></canvas>
+        <canvas id="cameraBg"></canvas>
         <div class="fog-overlay" id="fogOverlay"></div>
 
         <!-- 流体模拟主 canvas -->

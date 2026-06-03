@@ -47,7 +47,6 @@ const i18n = {
         capture: 'Capture',
         bgColor: 'background color',
         screenshot: 'take screenshot',
-        checkApp: 'Check out mobile app',
         langBtn: '中文',
         // dropdown options
         high: 'high',
@@ -83,7 +82,6 @@ const i18n = {
         capture: '截图',
         bgColor: '背景颜色',
         screenshot: '截图保存',
-        checkApp: '下载手机版',
         langBtn: 'English',
         high: '高',
         medium: '中',
@@ -461,8 +459,6 @@ function getWebGLContext (canvas) {
         formatR = getSupportedFormat(gl, gl.RGBA, gl.RGBA, halfFloatTexType);
     }
 
-    ga('send', 'event', isWebGL2 ? 'webgl2' : 'webgl', formatRGBA == null ? 'not supported' : 'supported');
-
     return {
         gl,
         ext: {
@@ -588,7 +584,6 @@ function startGUI () {
 
     let github = gui.add({ fun : () => {
         window.open('https://github.com/Meteorkid/webgl-fluid-sim');
-        ga('send', 'event', 'link button', 'github');
     } }, 'fun').name('Github');
     github.__li.className = 'cr function bigFont';
     github.__li.style.borderLeft = '3px solid #8C8C8C';

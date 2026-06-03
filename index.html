@@ -53,58 +53,129 @@
                 z-index: 2;
             }
 
-            .dg {
-                opacity: 0.9;
-            }
+            /* ===== Liquid Glass 液态玻璃风格 ===== */
+
             .dg.ac {
                 z-index: 10 !important;
             }
 
+            /* 主容器 — 磨砂玻璃 */
+            .dg.main {
+                background: rgba(18, 18, 28, 0.55) !important;
+                backdrop-filter: blur(50px) saturate(200%);
+                -webkit-backdrop-filter: blur(50px) saturate(200%);
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 16px !important;
+                box-shadow:
+                    0 8px 40px rgba(0, 0, 0, 0.5),
+                    0 2px 8px rgba(0, 0, 0, 0.3),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+                    inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+                overflow: hidden;
+                margin-top: 8px !important;
+            }
+
+            /* 标题栏 */
+            .dg .title {
+                background: rgba(255, 255, 255, 0.04) !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            }
+
+            /* 控件行 */
+            .dg li:not(.folder) {
+                background: transparent !important;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+                transition: background 0.2s ease;
+            }
+            .dg li:not(.folder):hover {
+                background: rgba(255, 255, 255, 0.06) !important;
+            }
+
+            /* 属性名 */
             .dg .property-name {
                 overflow: visible;
+                color: rgba(255, 255, 255, 0.85) !important;
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
             }
 
+            /* 数值输入框 */
+            .dg .c input[type=text] {
+                background: rgba(255, 255, 255, 0.07) !important;
+                border: 1px solid rgba(255, 255, 255, 0.10) !important;
+                border-radius: 6px !important;
+                color: rgba(255, 255, 255, 0.90) !important;
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+            }
+            .dg .c input[type=text]:focus {
+                border-color: rgba(10, 132, 255, 0.5) !important;
+                box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.15);
+            }
+
+            /* 下拉选择 */
+            .dg .c select {
+                background: rgba(255, 255, 255, 0.07) !important;
+                border: 1px solid rgba(255, 255, 255, 0.10) !important;
+                border-radius: 6px !important;
+                color: rgba(255, 255, 255, 0.90) !important;
+            }
+
+            /* 复选框 */
+            .dg .c input[type=checkbox] {
+                accent-color: #0a84ff;
+            }
+
+            /* 滑块轨道 */
+            .dg .c .slider {
+                background: rgba(255, 255, 255, 0.08) !important;
+                border-radius: 4px;
+            }
+            .dg .c .slider-fg {
+                background: linear-gradient(90deg, #0a84ff, #5ac8fa) !important;
+                border-radius: 4px;
+            }
+            .dg .c .slider .slider-knob {
+                background: rgba(255, 255, 255, 0.95) !important;
+                border-radius: 50%;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+            }
+
+            /* 文件夹 */
+            .dg .folder .title {
+                background: rgba(255, 255, 255, 0.03) !important;
+                border-left: 3px solid rgba(10, 132, 255, 0.5);
+                transition: background 0.2s ease;
+            }
+            .dg .folder .title:hover {
+                background: rgba(255, 255, 255, 0.06) !important;
+            }
+
+            /* 函数按钮 */
+            .dg .cr.function:not(.appBigFont) {
+                background: transparent !important;
+            }
+            .dg .cr.function:not(.appBigFont):hover {
+                background: rgba(255, 255, 255, 0.06) !important;
+            }
+            .dg .cr.function:not(.appBigFont) .property-name {
+                color: rgba(255, 255, 255, 0.70) !important;
+            }
+
+            /* 自定义按钮样式 */
             .bigFont {
-                font-size: 150%;
-                color: #8C8C8C;
-            }
-
-            .cr.function.appBigFont {
-                font-size: 150%;
-                line-height: 27px;
-                color: #A5F8D3;
-                background-color: #023C40;
-            }
-
-            .cr.function.appBigFont .property-name {
-                float: none;
-            }
-
-            .cr.function.appBigFont .icon {
-                position: sticky;
-                bottom: 27px;
+                font-size: 140%;
+                color: rgba(255, 255, 255, 0.55);
             }
 
             .icon {
                 font-family: 'iconfont';
                 font-size: 130%;
                 float: right;
-            }
-
-            .twitter:before {
-                content: 'a';
+                opacity: 0.5;
             }
 
             .github:before {
                 content: 'b';
-            }
-
-            .app:before {
-                content: 'c';
-            }
-
-            .discord:before {
-                content: 'd';
             }
 
             /* 摄像头全屏背景 */
